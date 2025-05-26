@@ -1,9 +1,8 @@
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap");
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
-
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
 
 @layer base {
   :root {
@@ -91,50 +90,55 @@
   * {
     @apply border-border;
   }
-  
-  html, body {
+
+  html,
+  body {
     @apply antialiased;
-    font-family: 'Inter', sans-serif;
+    font-family: "Inter", sans-serif;
     scroll-behavior: smooth;
   }
 
   body {
     @apply bg-background text-foreground;
   }
-  
+
   .glassmorphism {
     @apply backdrop-blur-lg bg-white/20 dark:bg-black/20 border border-white/20 dark:border-white/10 shadow-[0_4px_15px_-3px_rgba(0,0,0,0.1)];
   }
-  
+
   .glassmorphism-card {
     @apply glassmorphism rounded-2xl shadow-lg transition-all duration-300;
   }
-  
+
   .text-gradient {
     @apply bg-gradient-to-r from-brightcheck-indigo to-brightcheck-aqua bg-clip-text text-transparent;
   }
-  
+
   .verdict-true {
     @apply bg-brightcheck-green/10 text-brightcheck-green border border-brightcheck-green/20;
   }
-  
+
   .verdict-false {
     @apply bg-brightcheck-red/10 text-brightcheck-red border border-brightcheck-red/20;
   }
-  
+
   .verdict-unverified {
     @apply bg-brightcheck-amber/10 text-brightcheck-amber border border-brightcheck-amber/20;
   }
-  
+
   .bg-radar {
-    background-image: radial-gradient(circle, rgba(99, 91, 255, 0.1) 0%, transparent 70%);
+    background-image: radial-gradient(
+      circle,
+      rgba(99, 91, 255, 0.1) 0%,
+      transparent 70%
+    );
   }
 
   /* Addition: modern spotlight effect */
   .spotlight {
     @apply pointer-events-none absolute inset-0 z-0 bg-gradient-to-r from-brightcheck-indigo/20 via-brightcheck-aqua/20 to-transparent opacity-0;
   }
-  
+
   /* Add animation for the radar scan effect */
   @keyframes radar-scan {
     0% {
@@ -193,5 +197,51 @@
 
   ::-webkit-scrollbar-thumb:hover {
     @apply bg-muted/80;
+  }
+
+  /* Additional utility classes for better UI */
+  .line-clamp-2 {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .line-clamp-3 {
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  /* Enhanced animations */
+  @keyframes fade-in-up {
+    from {
+      opacity: 0;
+      transform: translateY(20px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  .animate-fade-in-up {
+    animation: fade-in-up 0.5s ease-out;
+  }
+
+  /* Pulse animation for loading states */
+  @keyframes pulse-glow {
+    0%,
+    100% {
+      box-shadow: 0 0 5px rgba(99, 91, 255, 0.3);
+    }
+    50% {
+      box-shadow: 0 0 20px rgba(99, 91, 255, 0.6);
+    }
+  }
+
+  .animate-pulse-glow {
+    animation: pulse-glow 2s ease-in-out infinite;
   }
 }
