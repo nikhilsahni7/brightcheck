@@ -1,0 +1,98 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model FactCheck {
+  id            String         @id @default(uuid())
+  claim         String
+  verdict       Verdict
+  confidence    Float          @default(0) // 0-100 confidence score
+  reasoning     String         @db.Text
+  riskLevel     RiskLevel      @default(MEDIUM)
+  metadata      Json?          // Enhanced metadata including analysis sections, processing time, etc.
+  processingTime Int?          // Processing time in milliseconds
+  evidenceCount Int           @default(0) // Number of evidence sources analyzed
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  evidence      Evidence[]
+  searchQueries SearchQuery[]
+}
+
+model Evidence {
+  id               String    @id @default(uuid())
+  sourceUrl        String
+  sourceName       String
+  sourceType       SourceType
+  snippet          String    @db.Text
+  fullContent      String?   @db.Text // Full extracted content
+  author           String?   // Author information
+  publishedDate    DateTime? // Publication date
+  credibilityScore Float     @default(5) // 0-10 credibility score
+  sentiment        Float?    // Sentiment analysis score (-1 to 1)
+  entities         Json?     // Extracted entities
+  keywords         Json?     // Extracted keywords
+  claims           Json?     // Extracted claims
+  metadata         Json?     // Additional metadata like engagement stats, timestamps, etc.
+  createdAt        DateTime  @default(now())
+  factCheckId      String
+  factCheck        FactCheck @relation(fields: [factCheckId], references: [id], onDelete: Cascade)
+}
+
+model SearchQuery {
+  id          String    @id @default(uuid())
+  query       String
+  platform    Platform
+  results     Json?     // Raw results for debugging/auditing
+  createdAt   DateTime  @default(now())
+  factCheckId String
+  factCheck   FactCheck @relation(fields: [factCheckId], references: [id], onDelete: Cascade)
+}
+
+enum Verdict {
+  TRUE
+  FALSE
+  PARTIALLY_TRUE
+  UNVERIFIED
+  OUTDATED
+}
+
+enum SourceType {
+  NEWS
+  FACT_CHECK
+  SOCIAL_MEDIA
+  ACADEMIC
+  OFFICIAL
+  FORUM
+  VIDEO
+  BLOG
+  WEB
+  OTHER
+}
+
+enum Platform {
+  GOOGLE
+  GOOGLE_NEWS
+  TWITTER
+  REDDIT
+  FACEBOOK
+  INSTAGRAM
+  YOUTUBE
+  TIKTOK
+  QUORA
+  OTHER
+}
+
+enum RiskLevel {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
