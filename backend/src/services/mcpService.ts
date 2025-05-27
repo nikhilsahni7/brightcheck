@@ -335,28 +335,25 @@ export class McpService {
       const query = keywords.slice(0, 3).join(" ");
       logger.info(`[TWITTER] 🐦 Searching Twitter with query: ${query}`);
 
-      // Use Web Unlocker for Twitter search since it requires unblocking
-      const twitterSearchUrl = `https://twitter.com/search?q=${encodeURIComponent(query)}&src=typed_query&f=live`;
-
-      // Use proper Twitter Posts scraper API
       const response = await axios({
         url: `${SCRAPER_APIS.TRIGGER_DATASET}?dataset_id=${SOCIAL_MEDIA_DATASETS.TWITTER_POSTS}&format=json`,
         method: "POST",
         data: [
           {
             search_query: query,
-            max_results: 20,
+            max_results: 20, // Increased for better coverage
           },
         ],
         headers: {
           Authorization: `Bearer ${API_TOKEN}`,
           "Content-Type": "application/json",
         },
-        timeout: 30000,
+        timeout: 45000, // Extended timeout for dataset API
       });
 
       if (response.data) {
-        return this.parseTwitterResultsFromHTML(response.data, query);
+        // Data from dataset API is expected to be JSON, pass directly to the parser
+        return this.parseTwitterResultsAdvanced(response.data, query); // Pass query for fallback URL generation
       }
       return [];
     } catch (error) {
@@ -423,7 +420,7 @@ export class McpService {
           Authorization: `Bearer ${API_TOKEN}`,
           "Content-Type": "application/json",
         },
-        timeout: 15000,
+        timeout: 30000,
       });
 
       if (response.data) {
@@ -496,7 +493,7 @@ export class McpService {
           Authorization: `Bearer ${API_TOKEN}`,
           "Content-Type": "application/json",
         },
-        timeout: 15000,
+        timeout: 30000,
       });
 
       if (response.data) {
@@ -567,7 +564,7 @@ export class McpService {
           Authorization: `Bearer ${API_TOKEN}`,
           "Content-Type": "application/json",
         },
-        timeout: 15000,
+        timeout: 30000,
       });
 
       if (response.data) {
@@ -642,7 +639,7 @@ export class McpService {
           Authorization: `Bearer ${API_TOKEN}`,
           "Content-Type": "application/json",
         },
-        timeout: 15000,
+        timeout: 30000,
       });
 
       if (response.data) {
@@ -718,7 +715,7 @@ export class McpService {
           Authorization: `Bearer ${API_TOKEN}`,
           "Content-Type": "application/json",
         },
-        timeout: 15000,
+        timeout: 30000,
       });
 
       if (response.data) {
@@ -789,7 +786,7 @@ export class McpService {
           Authorization: `Bearer ${API_TOKEN}`,
           "Content-Type": "application/json",
         },
-        timeout: 15000,
+        timeout: 30000,
       });
 
       if (response.data) {
@@ -860,7 +857,7 @@ export class McpService {
           Authorization: `Bearer ${API_TOKEN}`,
           "Content-Type": "application/json",
         },
-        timeout: 15000,
+        timeout: 30000,
       });
 
       if (response.data) {
@@ -910,7 +907,7 @@ export class McpService {
           Authorization: `Bearer ${API_TOKEN}`,
           "Content-Type": "application/json",
         },
-        timeout: 15000,
+        timeout: 30000,
       });
 
       if (response.data) {
@@ -960,7 +957,7 @@ export class McpService {
           Authorization: `Bearer ${API_TOKEN}`,
           "Content-Type": "application/json",
         },
-        timeout: 15000,
+        timeout: 30000,
       });
 
       if (response.data) {
@@ -1534,13 +1531,16 @@ export class McpService {
   private async extractKeywordsWithAI(text: string): Promise<string[]> {
     try {
       // Enhanced keyword extraction with importance scoring
-      const words = text
-        .toLowerCase()
+      const lowerText = text.toLowerCase();
+      const words = lowerText
         .replace(/[^\w\s]/g, " ")
         .split(/\s+/)
-        .filter((word) => word.length > 3);
+        .filter((word) => word.length > 3 && word.length < 25); // Added max length
 
-      const importantKeywords = [
+      // Prioritize entities found in the original claim (if available via preprocessedClaim)
+      // For now, use a generic list of important context words.
+      const importantContextKeywords = [
+        "claim",
         "fact",
         "check",
         "verify",
@@ -1548,28 +1548,122 @@ export class McpService {
         "false",
         "true",
         "misleading",
+        "evidence",
+        "source",
+        "report",
+        "study",
+        "official",
+        "expert",
+        "analysis",
         "covid",
         "vaccine",
-        "climate",
         "election",
         "government",
-        "study",
-        "research",
+        "climate",
+        "policy",
+        "finance",
       ];
+
+      const stopWords = new Set([
+        "about",
+        "after",
+        "all",
+        "also",
+        "and",
+        "any",
+        "are",
+        "because",
+        "been",
+        "but",
+        "can",
+        "could",
+        "did",
+        "for",
+        "from",
+        "has",
+        "have",
+        "how",
+        "into",
+        "its",
+        "just",
+        "like",
+        "more",
+        "most",
+        "not",
+        "now",
+        "only",
+        "other",
+        "out",
+        "over",
+        "should",
+        "some",
+        "such",
+        "than",
+        "that",
+        "the",
+        "their",
+        "then",
+        "there",
+        "these",
+        "they",
+        "this",
+        "those",
+        "through",
+        "thus",
+        "too",
+        "under",
+        "until",
+        "upon",
+        "very",
+        "was",
+        "were",
+        "what",
+        "when",
+        "where",
+        "which",
+        "while",
+        "who",
+        "whom",
+        "why",
+        "will",
+        "with",
+        "would",
+        "your",
+      ]);
 
       const wordCount = new Map<string, number>();
       words.forEach((word) => {
-        const boost = importantKeywords.includes(word) ? 3 : 1;
+        if (stopWords.has(word)) return;
+        let boost = 1;
+        if (importantContextKeywords.includes(word)) boost = 3;
+        // Boost proper nouns (simple check for now)
+        if (text.includes(word.charAt(0).toUpperCase() + word.slice(1)))
+          boost += 1;
+
         wordCount.set(word, (wordCount.get(word) || 0) + boost);
+      });
+
+      // Extract entities separately for higher importance if not captured well by keywords
+      const entities = this.extractEntities(text); // Using the simpler existing entity extractor
+      entities.forEach((entity) => {
+        const entityKeywords = entity
+          .toLowerCase()
+          .split(/\s+/)
+          .filter((ek) => ek.length > 2);
+        entityKeywords.forEach((ek) => {
+          if (!stopWords.has(ek)) {
+            wordCount.set(ek, (wordCount.get(ek) || 0) + 5); // Higher boost for entities
+          }
+        });
       });
 
       return Array.from(wordCount.entries())
         .sort((a, b) => b[1] - a[1])
-        .slice(0, 15)
+        .slice(0, 10) // Keep it focused to 10 main keywords
         .map(([word]) => word);
     } catch (error) {
       logger.error(`Error in AI keyword extraction: ${error}`);
-      return this.extractKeywords(text);
+      return this.extractKeywords(text); // Fallback to simpler version
     }
   }
 
@@ -1658,20 +1752,49 @@ export class McpService {
     claim: string,
     keywords: string[]
   ): string[] {
-    const variations = [
-      claim,
-      keywords.slice(0, 3).join(" "),
-      `"${claim}"`,
-      `${keywords[0]} ${keywords[1]} fact check`,
-      `${keywords[0]} ${keywords[1]} debunked`,
-      `${keywords[0]} ${keywords[1]} verified`,
-      `${keywords[0]} ${keywords[1]} true or false`,
-      `${keywords[0]} ${keywords[1]} misinformation`,
-      `${keywords[0]} ${keywords[1]} hoax`,
-      `${keywords[0]} ${keywords[1]} conspiracy`,
-    ];
+    const variations = new Set<string>(); // Use Set to avoid duplicates
 
-    return variations.filter((v) => v.length > 0 && v.length < 200);
+    // Original claim and core keywords
+    variations.add(claim);
+    if (keywords.length > 0) {
+      variations.add(keywords.slice(0, 3).join(" "));
+    }
+    if (keywords.length > 1) {
+      variations.add(`${keywords[0]} ${keywords[1]}`);
+    }
+
+    // Fact-checking specific queries
+    if (keywords.length > 0) {
+      const coreQuery = keywords.slice(0, 2).join(" ");
+      variations.add(`"${claim}"`); // Exact phrase
+      variations.add(`${coreQuery} fact check`);
+      variations.add(`${coreQuery} debunked`);
+      variations.add(`${coreQuery} evidence`);
+      variations.add(`${coreQuery} verified`);
+      variations.add(`${coreQuery} true or false`);
+      variations.add(`${coreQuery} analysis`);
+      variations.add(`${coreQuery} official statement`);
+    }
+
+    // Queries targeting different source types
+    if (keywords.length > 0) {
+      const firstKeyword = keywords[0];
+      variations.add(`${firstKeyword} news`);
+      variations.add(`${firstKeyword} study OR research`);
+      // variations.add(`${firstKeyword} social media discussion`); // Can be too noisy
+    }
+
+    // Question-form variations
+    if (!claim.endsWith("?")) {
+      variations.add(`Is it true that ${claim}?`);
+    }
+    variations.add(
+      `What is the evidence for ${keywords.slice(0, 2).join(" ")}?`
+    );
+
+    return Array.from(variations)
+      .filter((v) => v.length > 0 && v.length < 200)
+      .slice(0, 15); // Limit variations
   }
 
   /**
@@ -2445,7 +2568,12 @@ export class McpService {
           | "MISLEADING"
           | "UNVERIFIED",
         confidence: geminiResult.confidence,
-        summary: this.generateSummary(claim, evidence, geminiResult.verdict),
+        summary: this.generateSummary(
+          claim,
+          evidence,
+          geminiResult.verdict,
+          geminiResult.confidence
+        ), // Added geminiResult.confidence
         reasoning: geminiResult.reasoning,
       };
     } catch (error) {
@@ -2652,15 +2780,27 @@ export class McpService {
     } else if (supportRatio > 0.4 && contradictRatio < 0.3) {
       verdict = "PARTIALLY_TRUE";
       confidence = 65;
-    } else if (contradictRatio > 0.4) {
+    } else if (
+      contradictRatio > 0.4 &&
+      evidence.some(
+        (e) => e.sourceType === "FACT_CHECK" && (e.sentiment || 0) < -0.1
+      )
+    ) {
       verdict = "MISLEADING";
       confidence = 70;
+    } else if (contradictRatio > 0.4) {
+      verdict = "FALSE"; // If significant contradiction, lean towards FALSE
+      confidence = 70;
+    } else if (evidence.length === 0) {
+      verdict = "UNVERIFIED";
+      confidence = 10; // Very low confidence if no evidence
     }
 
+    // Ensure confidence is passed to generateSummary
     return {
       verdict,
       confidence,
-      summary: this.generateSummary(claim, evidence, verdict),
+      summary: this.generateSummary(claim, evidence, verdict, confidence),
       reasoning: this.generateReasoning(claim, evidence, verdict, confidence),
     };
   }
@@ -2668,46 +2808,32 @@ export class McpService {
   private generateSummary(
     claim: string,
     evidence: ExtractedEvidence[],
-    verdict: string
+    verdict: string,
+    confidence: number // Ensure confidence is a parameter here
   ): string {
-    const socialMediaCount = evidence.filter(
-      (e) =>
-        e.sourceType === "SOCIAL_MEDIA" ||
-        e.sourceType === "VIDEO" ||
-        e.sourceType === "FORUM"
-    ).length;
-    const factCheckCount = evidence.filter(
-      (e) => e.sourceType === "FACT_CHECK"
-    ).length;
-    const newsCount = evidence.filter((e) => e.sourceType === "NEWS").length;
-
-    let summary = `Our comprehensive analysis examined ${evidence.length} sources across multiple platforms. `;
-
-    if (factCheckCount > 0) {
-      summary += `${factCheckCount} fact-checking organizations, `;
-    }
-    if (newsCount > 0) {
-      summary += `${newsCount} news outlets, `;
-    }
-    if (socialMediaCount > 0) {
-      summary += `${socialMediaCount} social media discussions, `;
-    }
-
-    summary = summary.replace(/, $/, " "); // Remove trailing comma
-    summary += `were analyzed. `;
-
     const verdictText =
       verdict === "FALSE"
-        ? "false"
+        ? "appears to be false"
         : verdict === "TRUE"
-          ? "true"
+          ? "appears to be true"
           : verdict === "PARTIALLY_TRUE"
-            ? "partially true"
+            ? "appears to be partially true"
             : verdict === "MISLEADING"
-              ? "misleading"
-              : "unverified";
+              ? "is likely misleading"
+              : "remains unverified";
 
-    summary += `The evidence indicates this claim is ${verdictText}.`;
+    let summary = `Based on an analysis of ${evidence.length} sources, the claim "${claim}" ${verdictText} with a confidence level of ${confidence}%. `;
+
+    const keySourceTypes = new Set(evidence.map((e) => e.sourceType));
+    if (keySourceTypes.size > 0) {
+      summary += `Evidence was gathered from types such as: ${Array.from(keySourceTypes).slice(0, 3).join(", ")}. `;
+    }
+
+    if (verdict === "UNVERIFIED" && evidence.length === 0) {
+      summary = `The claim "${claim}" could not be verified due to a lack of available evidence. Confidence is ${confidence}%.`;
+    } else if (verdict === "UNVERIFIED") {
+      summary = `The claim "${claim}" remains unverified after reviewing ${evidence.length} sources. More conclusive evidence is needed. Confidence is ${confidence}%.`;
+    }
 
     return summary;
   }
@@ -2729,40 +2855,87 @@ export class McpService {
     );
     const newsSources = evidence.filter((e) => e.sourceType === "NEWS");
     const academicSources = evidence.filter((e) => e.sourceType === "ACADEMIC");
+    const officialSources = evidence.filter((e) => e.sourceType === "OFFICIAL");
 
-    let reasoning = `## Analysis Summary\n\n`;
-    reasoning += `**Verdict**: ${verdict.replace("_", " ")}\n`;
-    reasoning += `**Confidence**: ${confidence}%\n\n`;
+    const formattedVerdict = verdict.replace("_", " ").toLowerCase();
+    let reasoning = `# Fact-Check Analysis: "${claim}"\n\n`;
+    reasoning += `## Verdict: ${formattedVerdict.charAt(0).toUpperCase() + formattedVerdict.slice(1)}\n`;
+    reasoning += `**Confidence Level**: ${confidence}%\n\n`;
 
-    reasoning += `### Evidence Breakdown\n\n`;
+    reasoning += `### Overall Summary:\n`;
+    reasoning += `${this.generateSummary(claim, evidence, verdict, confidence)}\n\n`;
 
+    reasoning += `### Evidence Breakdown:\n`;
+    if (evidence.length === 0) {
+      reasoning += "- No direct evidence found for this claim.\n";
+    } else {
+      const supporting = evidence.filter((e) => (e.sentiment || 0) > 0.2);
+      const contradicting = evidence.filter((e) => (e.sentiment || 0) < -0.2);
+      const neutral = evidence.filter((e) => Math.abs(e.sentiment || 0) <= 0.2);
+
+      reasoning += `- **Total Sources Analyzed**: ${evidence.length}\n`;
+      reasoning += `- **Supporting Evidence**: ${supporting.length} sources\n`;
+      reasoning += `- **Contradicting Evidence**: ${contradicting.length} sources\n`;
+      reasoning += `- **Neutral Evidence**: ${neutral.length} sources\n\n`;
+
+      if (supporting.length > 0) {
+        reasoning += `#### Key Supporting Evidence:\n`;
+        supporting.slice(0, 2).forEach((e) => {
+          reasoning += `- *${e.title}* (Source: ${e.source}, Type: ${e.sourceType}, Credibility: ${e.credibilityScore}/10)\n`;
+        });
+        reasoning += `\n`;
+      }
+      if (contradicting.length > 0) {
+        reasoning += `#### Key Contradicting Evidence:\n`;
+        contradicting.slice(0, 2).forEach((e) => {
+          reasoning += `- *${e.title}* (Source: ${e.source}, Type: ${e.sourceType}, Credibility: ${e.credibilityScore}/10)\n`;
+        });
+        reasoning += `\n`;
+      }
+    }
+
+    reasoning += `### Source Type Analysis:\n`;
     if (factCheckSources.length > 0) {
-      reasoning += `📋 **${factCheckSources.length} Fact-Check Organizations** analyzed this claim\n`;
+      reasoning += `- **Fact-Checking Organizations**: ${factCheckSources.length} sources reviewed.\n`;
     }
-
     if (newsSources.length > 0) {
-      reasoning += `📰 **${newsSources.length} News Sources** provided coverage\n`;
+      reasoning += `- **News Outlets**: ${newsSources.length} reports consulted.\n`;
     }
-
-    if (socialMediaSources.length > 0) {
-      reasoning += `📱 **${socialMediaSources.length} Social Media Sources** showing public discussion\n`;
-    }
-
     if (academicSources.length > 0) {
-      reasoning += `🎓 **${academicSources.length} Academic Sources** with research evidence\n`;
+      reasoning += `- **Academic Publications**: ${academicSources.length} studies/papers considered.\n`;
+    }
+    if (officialSources.length > 0) {
+      reasoning += `- **Official Sources**: ${officialSources.length} documents/statements analyzed.\n`;
+    }
+    if (socialMediaSources.length > 0) {
+      reasoning += `- **Social Media & Forums**: ${socialMediaSources.length} posts/discussions identified, indicating public sentiment and engagement. Key platforms include ${[...new Set(socialMediaSources.map((s) => s.platform || s.source))].slice(0, 3).join(", ")}.\n`;
+    }
+    if (evidence.length > 0) {
+      const avgCredibility = (
+        evidence.reduce((sum, e) => sum + e.credibilityScore, 0) /
+        Math.max(1, evidence.length)
+      ).toFixed(1);
+      reasoning += `\n- **Average Source Credibility**: ${avgCredibility}/10\n`;
+    }
+    reasoning += `\n`;
+
+    const socialSignals = this.analyzeSocialSignals(evidence);
+    if (
+      socialSignals.totalEngagement > 0 ||
+      socialSignals.influencerMentions > 0
+    ) {
+      reasoning += `### Social Media Signals:\n`;
+      reasoning += `- **Total Engagement (Likes, Shares, Comments)**: Approximately ${socialSignals.totalEngagement}\n`;
+      reasoning += `- **Overall Sentiment**: ${socialSignals.sentiment}\n`;
+      reasoning += `- **Virality Score**: ${socialSignals.viralityScore.toFixed(0)}/100\n`;
+      reasoning += `- **Influencer/Verified Mentions**: ${socialSignals.influencerMentions}\n\n`;
     }
 
-    const avgCredibility = (
-      evidence.reduce((sum, e) => sum + e.credibilityScore, 0) / evidence.length
-    ).toFixed(1);
-    reasoning += `\n⭐ **Average Source Credibility**: ${avgCredibility}/10\n\n`;
-
-    reasoning += `### Key Platforms Analyzed\n`;
-    const platforms = [...new Set(evidence.map((e) => e.platform || e.source))];
-    reasoning += platforms.slice(0, 8).join(", ");
-    if (platforms.length > 8) reasoning += `, and ${platforms.length - 8} more`;
-
-    reasoning += `\n\n*This analysis used BrightCheck's advanced AI system powered by Bright Data's comprehensive web intelligence platform.*`;
+    reasoning += `### Methodology Notes:\n`;
+    reasoning += `This analysis was performed by BrightCheck's AI, leveraging Bright Data's web intelligence platform. It involved automated searching, content extraction, and AI-driven analysis across a diverse range of web sources. \n`;
+    if (verdict === "UNVERIFIED" && confidence < 50) {
+      reasoning += `Limitations: The 'Unverified' status with low confidence may indicate difficulties in accessing sufficient relevant data or strongly conflicting information without clear resolution from authoritative sources.\n`;
+    }
 
     return reasoning;
   }
@@ -2914,27 +3087,98 @@ export class McpService {
   }
 
   // Additional parser methods for social media platforms
-  private parseTwitterResultsAdvanced(data: string): DiscoveryResult[] {
+  private parseTwitterResultsAdvanced(
+    data: any,
+    query: string
+  ): DiscoveryResult[] {
+    // Changed data type to any
     try {
-      const tweets = JSON.parse(data);
-      return tweets.map((tweet: any) => ({
-        url: `https://twitter.com/${tweet.username}/status/${tweet.id}`,
-        title: `Tweet by @${tweet.username}`,
-        description: tweet.text,
-        source: "Twitter",
-        type: "SOCIAL_MEDIA",
-        credibilityScore: tweet.verified ? 7 : 5,
-        publishedDate: tweet.created_at,
-        author: tweet.username,
-        platform: "Twitter",
-        verified: tweet.verified,
-        engagement: {
-          likes: tweet.like_count,
-          shares: tweet.retweet_count,
-          comments: tweet.reply_count,
-          views: tweet.view_count,
-        },
-      }));
+      // Ensure data is parsed if it's a string, otherwise use as is if already an object/array
+      const tweetsArray = typeof data === "string" ? JSON.parse(data) : data;
+
+      // Check if tweetsArray is indeed an array
+      if (!Array.isArray(tweetsArray)) {
+        logger.error(
+          `Error parsing Twitter results: Expected an array but got ${typeof tweetsArray}`
+        );
+        // Attempt to see if tweetsArray is an object with a results field (common in some API structures)
+        if (
+          typeof tweetsArray === "object" &&
+          tweetsArray !== null &&
+          Array.isArray(tweetsArray.results)
+        ) {
+          // Fallback to using tweetsArray.results if it exists and is an array
+          return (tweetsArray.results as any[])
+            .map((tweet: any) => ({
+              url: `https://twitter.com/${tweet.user?.screen_name || tweet.username}/status/${tweet.id_str || tweet.id}`,
+              title: `Tweet by @${tweet.user?.screen_name || tweet.username}`,
+              description: tweet.text || tweet.full_text || "",
+              source: "Twitter",
+              type: "SOCIAL_MEDIA",
+              credibilityScore: tweet.user?.verified || tweet.verified ? 7 : 5,
+              publishedDate: tweet.created_at,
+              author: tweet.user?.screen_name || tweet.username,
+              platform: "Twitter",
+              verified: tweet.user?.verified || tweet.verified || false,
+              engagement: {
+                likes: tweet.favorite_count,
+                shares: tweet.retweet_count,
+                comments: tweet.reply_count,
+                // views may not always be available directly, depends on API version
+              },
+            }))
+            .slice(0, 10); // Limit to 10 results
+        } else if (
+          typeof tweetsArray === "object" &&
+          tweetsArray !== null &&
+          tweetsArray.data &&
+          Array.isArray(tweetsArray.data)
+        ) {
+          // Fallback for another common structure e.g. Twitter API v2 like
+          return (tweetsArray.data as any[])
+            .map((tweet: any) => ({
+              url: `https://twitter.com/${tweet.author_id}/status/${tweet.id}`, // May need to fetch author username separately
+              title: `Tweet by user ${tweet.author_id}`, // Placeholder title
+              description: tweet.text || "",
+              source: "Twitter",
+              type: "SOCIAL_MEDIA",
+              credibilityScore: 5, // Cannot determine verification easily here
+              publishedDate: tweet.created_at,
+              author: tweet.author_id, // This is an ID, not username
+              platform: "Twitter",
+              verified: false,
+              engagement: {
+                likes: tweet.public_metrics?.like_count,
+                shares: tweet.public_metrics?.retweet_count,
+                comments: tweet.public_metrics?.reply_count,
+                views: tweet.public_metrics?.impression_count,
+              },
+            }))
+            .slice(0, 10);
+        }
+        return [];
+      }
+
+      return tweetsArray
+        .map((tweet: any) => ({
+          url: `https://twitter.com/${tweet.user?.screen_name || tweet.username}/status/${tweet.id_str || tweet.id}`,
+          title: `Tweet by @${tweet.user?.screen_name || tweet.username}`,
+          description: tweet.text || tweet.full_text || "",
+          source: "Twitter",
+          type: "SOCIAL_MEDIA",
+          credibilityScore: tweet.user?.verified || tweet.verified ? 7 : 5,
+          publishedDate: tweet.created_at,
+          author: tweet.user?.screen_name || tweet.username,
+          platform: "Twitter",
+          verified: tweet.user?.verified || tweet.verified || false,
+          engagement: {
+            likes: tweet.favorite_count,
+            shares: tweet.retweet_count,
+            comments: tweet.reply_count,
+            // views: tweet.view_count, // view_count might not be standard in all tweet objects
+          },
+        }))
+        .slice(0, 10); // Limit to 10 results
     } catch (error) {
       logger.error(`Error parsing Twitter results: ${error}`);
       return [];
@@ -4474,27 +4718,43 @@ export class McpService {
         (e) => e.sourceType === "FACT_CHECK"
       );
 
-      let verdict:
+      let verdictText:
         | "TRUE"
         | "FALSE"
         | "PARTIALLY_TRUE"
         | "MISLEADING"
         | "UNVERIFIED" = "UNVERIFIED";
-      let confidence = 0.3;
+      let currentConfidence = 0.3;
 
       if (factCheckEvidence.length > 0) {
-        verdict = "PARTIALLY_TRUE";
-        confidence = 0.6;
+        verdictText = "PARTIALLY_TRUE";
+        currentConfidence = 0.6;
       } else if (highCredibilityEvidence.length >= 2) {
-        verdict = "PARTIALLY_TRUE";
-        confidence = 0.5;
+        verdictText = "PARTIALLY_TRUE";
+        currentConfidence = 0.5;
+      } else if (evidence.length === 0) {
+        verdictText = "UNVERIFIED";
+        currentConfidence = 0.1; // Very low if no evidence at all
       }
 
+      const finalSummary = this.generateSummary(
+        claim,
+        evidence,
+        verdictText,
+        currentConfidence
+      );
+      const finalReasoning = this.generateReasoning(
+        claim,
+        evidence,
+        verdictText,
+        currentConfidence
+      );
+
       return {
-        verdict,
-        confidence,
-        summary: `Analysis of "${claim}" found ${evidence.length} sources with ${highCredibilityEvidence.length} high-credibility sources.`,
-        reasoning: `Based on analysis of ${evidence.length} sources, including ${factCheckEvidence.length} fact-checking sources and ${highCredibilityEvidence.length} high-credibility sources. ${evidence.length > 0 ? "Some evidence was found but requires further verification." : "Limited evidence available for verification."}`,
+        verdict: verdictText,
+        confidence: currentConfidence,
+        summary: finalSummary,
+        reasoning: finalReasoning,
       };
     }
   }

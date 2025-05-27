@@ -82,13 +82,17 @@ export default async function factCheckProcessor(job: Job) {
         data: {
           verdict: result.verdict as any,
           confidence: result.confidence,
+          summary: result.summary,
           reasoning: result.reasoning,
-          riskLevel: extractRiskLevel(result.reasoning),
+          riskLevel: result.riskAssessment.level as any,
           evidenceCount:
             result.evidence.supporting.length +
             result.evidence.contradicting.length +
             result.evidence.neutral.length,
           processingTime: result.processingTime,
+          socialSignals: result.socialSignals as any,
+          riskAssessment: result.riskAssessment as any,
+          methodology: result.methodology,
           metadata: {
             processingTimestamp: new Date().toISOString(),
             brightCheckVersion: "2.0-MCP-Enhanced",
@@ -185,7 +189,7 @@ export default async function factCheckProcessor(job: Job) {
           result.evidence.contradicting.length +
           result.evidence.neutral.length,
         processingTime: totalTime,
-        riskLevel: extractRiskLevel(result.reasoning),
+        riskLevel: result.riskAssessment.level as any,
       };
     } catch (processingError) {
       // Update fact check with error status

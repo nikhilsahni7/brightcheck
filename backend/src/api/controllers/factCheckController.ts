@@ -56,12 +56,41 @@ const transformEvidence = (evidence: any) => {
     return [];
   };
 
-  return {
+  // Helper function to safely convert JSON string to object
+  const jsonToObject = (value: any): object | undefined => {
+    if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+      return value; // Already an object
+    }
+    if (typeof value === "string") {
+      try {
+        const parsed = JSON.parse(value);
+        return typeof parsed === "object" &&
+          parsed !== null &&
+          !Array.isArray(parsed)
+          ? parsed
+          : undefined;
+      } catch {
+        return undefined;
+      }
+    }
+    return undefined;
+  };
+
+  const transformed = {
     ...evidence,
     entities: jsonToArray(evidence.entities),
     keywords: jsonToArray(evidence.keywords),
     claims: jsonToArray(evidence.claims),
+    engagement: jsonToObject(evidence.engagement), // Parse engagement
   };
+
+  // If engagement was not parsable or was not a valid object, ensure it's at least an empty object or undefined
+  // depending on how the frontend expects it if missing.
+  // For now, if it ended up undefined from jsonToObject, we'll keep it that way.
+  // If it was null from DB and jsonToObject returned undefined, it remains undefined.
+  // If it was a valid object from DB, it remains an object.
+
+  return transformed;
 };
 
 export const submitFactCheck = async (
@@ -152,13 +181,35 @@ export const getFactCheck = async (
     // Fetch fact check with evidence
     const factCheck = await prisma.factCheck.findUnique({
       where: { id },
-      include: {
-        evidence: true,
+      select: {
+        id: true,
+        claim: true,
+        verdict: true,
+        confidence: true,
+        summary: true,
+        reasoning: true,
+        socialSignals: true,
+        riskAssessment: true,
+        methodology: true,
+        riskLevel: true,
+        metadata: true,
+        processingTime: true,
+        evidenceCount: true,
+        createdAt: true,
+        updatedAt: true,
+        evidence: {
+          orderBy: {
+            credibilityScore: "desc",
+          },
+        },
         searchQueries: {
           select: {
             query: true,
             platform: true,
             createdAt: true,
+          },
+          orderBy: {
+            createdAt: "desc",
           },
         },
       },

@@ -3,7 +3,7 @@ import { logger } from "../utils/logger";
 
 class GeminiService {
   private genAI: GoogleGenerativeAI;
-  private model: string = "gemini-2.5-flash-preview-05-20";
+  private model: string = "gemini-2.5-flash-preview-04-17";
 
   constructor() {
     const apiKey = process.env.GEMINI_API_KEY;
@@ -111,14 +111,6 @@ RISK_LEVEL: [LOW/MEDIUM/HIGH/CRITICAL]
 **Real-World Impact:**
 [Explain potential consequences of believing/sharing this claim]
 
-🎯 BRIGHTCHECK METHODOLOGY:
-This analysis utilized Bright Data's MCP server to:
-• DISCOVER: Searched 10+ platforms including Google, Google News, Bing, Twitter, Reddit, Facebook, YouTube, Instagram, TikTok, fact-checking sites, major news outlets, and academic sources
-• ACCESS: Used Web Unlocker API and Browser API to bypass restrictions and access protected content
-• EXTRACT: Processed content with advanced NLP, entity extraction, and sentiment analysis
-• INTERACT: Employed browser automation for dynamic JavaScript-rendered content
-• ANALYZE: Applied Gemini Pro AI for comprehensive evidence synthesis
-
 ⚡ COMPETITIVE ADVANTAGES:
 - Real-time data (not static training cutoffs)
 - Multi-platform evidence gathering
@@ -209,7 +201,6 @@ Remember: Your analysis should be so comprehensive and well-reasoned that it cle
         limitations,
         recommendations,
         riskLevel,
-        originalResponse: response,
       });
 
       return {
@@ -277,8 +268,13 @@ Remember: Your analysis should be so comprehensive and well-reasoned that it cle
       limitations,
       recommendations,
       riskLevel,
-      originalResponse,
     } = sections;
+
+    // Attempt to remove Gemini's methodology section to avoid duplication
+    // This is a simple string replacement, might need refinement
+    let cleanedEvidenceSynthesis = evidenceSynthesis
+      ?.replace(/🎯 BRIGHTCHECK METHODOLOGY:[\s\S]*/i, "")
+      .trim();
 
     let reasoning = `# 🔍 BrightCheck Comprehensive Analysis\n\n`;
 
@@ -291,8 +287,8 @@ Remember: Your analysis should be so comprehensive and well-reasoned that it cle
     };
     reasoning += `**Risk Level:** ${riskEmoji[riskLevel as keyof typeof riskEmoji] || "🟡"} ${riskLevel}\n\n`;
 
-    if (evidenceSynthesis) {
-      reasoning += `## 📊 Evidence Synthesis\n${evidenceSynthesis}\n\n`;
+    if (cleanedEvidenceSynthesis) {
+      reasoning += `## 📊 Evidence Synthesis\n${cleanedEvidenceSynthesis}\n\n`;
     }
 
     if (credibilityAssessment) {

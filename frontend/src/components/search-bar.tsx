@@ -6,12 +6,40 @@ import { toast } from "sonner";
 import { Button } from "./ui/button";
 
 const exampleClaims = [
-  "Did Pak Airforce destroy 2 Indian Rafale jets?",
-  "Is Twitter planning to charge users $20/month?",
-  "Has NASA confirmed water on Mars?",
-  "Did the WHO announce a new pandemic?",
-  "Is climate change causing more extreme weather?",
-  "Did the COVID-19 vaccine cause side effects?",
+  // 🌍 World & Politics
+
+  "Has North Korea launched a nuclear missile in 2025?",
+  "Is the UN planning to remove permanent members of the Security Council?",
+
+  // 💻 Tech & Social Media
+  "Is Twitter charging $20/month for verified users?",
+  "Did Apple announce a foldable iPhone in 2025?",
+  "Is OpenAI releasing ChatGPT-5 this year?",
+
+  // 🌌 Science & Space
+  "Has NASA confirmed the presence of water on Mars?",
+  "Did scientists discover a parallel universe?",
+  "Has ISRO landed a rover on the dark side of the moon?",
+
+  // 🦠 Health & COVID
+  "Did the COVID-19 vaccine cause infertility in men?",
+  "Has the WHO declared a new pandemic in 2025?",
+  "Are antidepressants proven to be ineffective now?",
+
+  // 🌡️ Climate & Environment
+  "Is climate change responsible for extreme flooding in Europe?",
+  "Did July 2025 break the record for the hottest month ever?",
+  "Is the Amazon rainforest losing 1% every year?",
+
+  // 🧠 Conspiracy & Misinformation
+  "Is 5G responsible for bird deaths around the world?",
+  "Are COVID vaccines secretly microchipping people?",
+  "Did Bill Gates say he wants to reduce global population using vaccines?",
+
+  // 🧾 Economics & Society
+  "Is India now the 3rd largest economy in the world?",
+  "Are food prices expected to double by the end of 2025?",
+  "Has the world entered a global recession in 2025?",
 ];
 
 type SearchBarProps = {

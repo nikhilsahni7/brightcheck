@@ -16,6 +16,10 @@ model FactCheck {
   verdict       Verdict
   confidence    Float          @default(0) // 0-100 confidence score
   reasoning     String         @db.Text
+  summary       String?        // Add summary field
+  socialSignals Json?          // Add socialSignals field
+  riskAssessment Json?        // Add riskAssessment field
+  methodology   String?        // Add methodology field
   riskLevel     RiskLevel      @default(MEDIUM)
   metadata      Json?          // Enhanced metadata including analysis sections, processing time, etc.
   processingTime Int?          // Processing time in milliseconds
