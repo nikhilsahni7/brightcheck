@@ -1,15 +1,6 @@
 import { PrismaClient } from "@prisma/client";
 import { Job } from "bullmq";
-import mcpService, {
-  type BrightDataTriggerResult,
-  triggerFacebookPostsScraping,
-  triggerTwitterPostsScraping,
-  triggerRedditPostsScraping,
-  triggerYouTubeVideosScraping,
-  triggerInstagramPostsScraping,
-  triggerTikTokPostsScraping,
-  triggerQuoraPostsScraping,
-} from "../services/mcpService";
+import mcpService from "../services/mcpService";
 import { logger } from "../utils/logger";
 
 const prismaClient = new PrismaClient();
@@ -180,6 +171,7 @@ export default async function factCheckProcessor(job: Job) {
         );
       }
 
+      /*
       logger.info(`[FACT-CHECK] Initiating social media scraping for claim on FactCheck ID: ${factCheck.id}`);
       const claimForSocialSearch = job.data.claim; // Original claim
 
@@ -230,12 +222,12 @@ export default async function factCheckProcessor(job: Job) {
       for (const platform of socialMediaPlatforms) {
         try {
           logger.info(`Attempting to trigger ${platform.datasetType} scraping for claim: "${claim}"`);
-          
+
           const triggerResult: BrightDataTriggerResult = await platform.scraperFunction([{ query: claim, url: undefined }]);
 
           if (triggerResult.jobInitiated) {
             logger.info(`${platform.datasetType} scraping job initiated. Delivery ID: ${triggerResult.deliveryId || 'N/A'}, Snapshot ID: ${triggerResult.snapshotId || 'N/A'}. Raw Response: ${JSON.stringify(triggerResult.rawResponse)}`);
-            
+
             if (triggerResult.deliveryId || triggerResult.snapshotId) {
               await prismaClient.evidence.create({
                 data: {
@@ -274,6 +266,7 @@ export default async function factCheckProcessor(job: Job) {
       }
 
       logger.info(`[FACT-CHECK] Completed initiating social media scraping attempts for FactCheck ID: ${factCheck.id}`);
+      */
 
     const totalTime = Date.now() - startTime;
       logger.info(
