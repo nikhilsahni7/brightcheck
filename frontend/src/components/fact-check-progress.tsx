@@ -94,6 +94,14 @@ export function FactCheckProgress({
             <Brain className="w-6 h-6 text-primary" />
             BrightCheck AI Agent Analysis
           </CardTitle>
+
+          {/* in the right side we have to add text-it can take upto 2 mins dont leave the page */}
+          <div className="flex items-center gap-2">
+            <p className="text-sm text-muted-foreground ml-auto mr-auto text-center w-full mt-2 mb-2 bg-red-500 rounded-lg p-2 text-white font-bold animate-pulse ">
+              The analysis can take upto 2 mins, dont leave the page
+            </p>
+          </div>
+
           <p className="text-sm text-muted-foreground">
             Analyzing: "
             {claim.length > 100 ? claim.substring(0, 100) + "..." : claim}"

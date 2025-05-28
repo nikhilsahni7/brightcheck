@@ -1,6 +1,15 @@
 import { PrismaClient } from "@prisma/client";
 import { Job } from "bullmq";
-import mcpService from "../services/mcpService";
+import mcpService, {
+  type BrightDataTriggerResult,
+  triggerFacebookPostsScraping,
+  triggerTwitterPostsScraping,
+  triggerRedditPostsScraping,
+  triggerYouTubeVideosScraping,
+  triggerInstagramPostsScraping,
+  triggerTikTokPostsScraping,
+  triggerQuoraPostsScraping,
+} from "../services/mcpService";
 import { logger } from "../utils/logger";
 
 const prismaClient = new PrismaClient();
@@ -171,7 +180,102 @@ export default async function factCheckProcessor(job: Job) {
         );
       }
 
-      const totalTime = Date.now() - startTime;
+      logger.info(`[FACT-CHECK] Initiating social media scraping for claim on FactCheck ID: ${factCheck.id}`);
+      const claimForSocialSearch = job.data.claim; // Original claim
+
+      type SocialMediaScraperFunction = (inputs: any[]) => Promise<BrightDataTriggerResult>;
+
+      const socialMediaPlatforms: {
+        platformName: string;
+        scraperFunction: SocialMediaScraperFunction;
+        datasetType: string; // For logging/identification
+      }[] = [
+        {
+          platformName: "Facebook",
+          scraperFunction: triggerFacebookPostsScraping,
+          datasetType: "Facebook Posts",
+        },
+        {
+          platformName: "Twitter",
+          scraperFunction: triggerTwitterPostsScraping,
+          datasetType: "Twitter Posts",
+        },
+        {
+          platformName: "YouTube",
+          scraperFunction: triggerYouTubeVideosScraping,
+          datasetType: "YouTube Videos",
+        },
+        {
+          platformName: "Instagram",
+          scraperFunction: triggerInstagramPostsScraping,
+          datasetType: "Instagram Posts",
+        },
+        {
+          platformName: "TikTok",
+          scraperFunction: triggerTikTokPostsScraping,
+          datasetType: "TikTok Posts",
+        },
+        {
+          platformName: "Quora",
+          scraperFunction: triggerQuoraPostsScraping,
+          datasetType: "Quora Posts",
+        },
+        {
+          platformName: "Reddit",
+          scraperFunction: triggerRedditPostsScraping,
+          datasetType: "Reddit Posts",
+        },
+      ];
+
+      for (const platform of socialMediaPlatforms) {
+        try {
+          logger.info(`Attempting to trigger ${platform.datasetType} scraping for claim: "${claim}"`);
+          
+          const triggerResult: BrightDataTriggerResult = await platform.scraperFunction([{ query: claim, url: undefined }]);
+
+          if (triggerResult.jobInitiated) {
+            logger.info(`${platform.datasetType} scraping job initiated. Delivery ID: ${triggerResult.deliveryId || 'N/A'}, Snapshot ID: ${triggerResult.snapshotId || 'N/A'}. Raw Response: ${JSON.stringify(triggerResult.rawResponse)}`);
+            
+            if (triggerResult.deliveryId || triggerResult.snapshotId) {
+              await prismaClient.evidence.create({
+                data: {
+                  factCheckId: factCheck.id,
+                  sourceUrl: `search://${platform.datasetType.toLowerCase().replace(/_/g, '/')}/?query=${encodeURIComponent(claim)}`,
+                  sourceName: `${platform.platformName} Search (BrightData)`,
+                  sourceType: "SOCIAL_MEDIA",
+                  snippet: `Social media scraping initiated for "${claim.substring(0, 50)}..." on ${platform.platformName}.`,
+                  fullContent: null,
+                  author: null,
+                  publishedDate: null,
+                  credibilityScore: 5, // Default, can be adjusted
+                  metadata: {
+                    brightDataDeliveryId: triggerResult.deliveryId, // Store delivery_id if present
+                    brightDataSnapshotId: triggerResult.snapshotId, // Store snapshot_id if present
+                    query: claim,
+                    platformApi: platform.datasetType,
+                    triggerTimestamp: new Date().toISOString(),
+                  },
+                },
+              });
+              logger.info(`Evidence record created for ${platform.datasetType} with Delivery ID: ${triggerResult.deliveryId} and Snapshot ID: ${triggerResult.snapshotId}`);
+            } else {
+              // This case should ideally not happen if jobInitiated is true and Bright Data API behaves as expected
+              logger.warn(`Job initiated for ${platform.datasetType} but no delivery_id or snapshot_id received. Claim: "${claim}". Raw result: ${JSON.stringify(triggerResult.rawResponse)}`);
+            }
+          } else {
+            // Job was not initiated, e.g., due to invalid input for the specific dataset (like query-only for Twitter)
+            logger.warn(`${platform.datasetType} scraping job NOT initiated for claim: "${claim}". Reason: ${triggerResult.error || 'Unknown reason, check mcpService logs.'}. Raw details: ${JSON.stringify(triggerResult.rawResponse)}`);
+          }
+        } catch (error: any) {
+          // This catch block handles errors from the scraperFunction call itself (e.g., network issues, unexpected exceptions)
+          // not covered by the BrightDataTriggerResult.success = false scenario (which indicates an API error from Bright Data)
+          logger.error(`Critical error calling ${platform.datasetType} scraper function for claim "${claim}": ${error.message}`, { stack: error.stack });
+        }
+      }
+
+      logger.info(`[FACT-CHECK] Completed initiating social media scraping attempts for FactCheck ID: ${factCheck.id}`);
+
+    const totalTime = Date.now() - startTime;
       logger.info(
         `[FACT-CHECK] Comprehensive fact-check completed in ${totalTime}ms`
       );

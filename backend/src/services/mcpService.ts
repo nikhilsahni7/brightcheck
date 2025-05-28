@@ -4,6 +4,23 @@ import * as cheerio from "cheerio";
 import { logger } from "../utils/logger";
 import geminiService from "./geminiService";
 
+// --- Bright Data API Response Types ---
+export interface BrightDataApiResponse {
+  delivery_id?: string;
+  snapshot_id?: string;
+  // Allow any other fields Bright Data might return
+  [key: string]: any;
+}
+
+export interface BrightDataTriggerResult {
+  success: boolean; // Indicates if the operation (calling Bright Data or deciding not to) was logically successful
+  jobInitiated: boolean; // True if a request was actually sent to Bright Data
+  deliveryId?: string;
+  snapshotId?: string;
+  rawResponse?: any; // Raw response from Bright Data or error object
+  error?: string; // User-friendly error message or reason for not initiating
+}
+
 const prisma = new PrismaClient();
 
 // Environment variables for Bright Data
@@ -29,38 +46,39 @@ const TOTAL_TIMEOUT = 275000; // 275 seconds total timeout (4.5 minutes)
 const SOCIAL_MEDIA_DATASETS = {
   // Twitter/X
   TWITTER_POSTS: "gd_lwxkxvnf1cynvib9co",
-  TWITTER_PROFILES: "gd_ld2fk7gm4z1xd9nsl2",
+  TWITTER_PROFILES: "gd_lwxmeb2u1cniijd7t4",
 
   // Instagram
   INSTAGRAM_POSTS: "gd_lk5ns7kz21pck8jpis",
-  INSTAGRAM_PROFILES: "gd_l1viktl72bvl7bjuj0",
-  INSTAGRAM_REELS: "gd_ltppn085pokosxh13",
-  INSTAGRAM_COMMENTS: "gd_l8d2fk7gm5z1xd9nsl",
+  INSTAGRAM_PROFILES: "gd_l1vikfch901nx3by4",
+  INSTAGRAM_REELS: "gd_lyclm20il4r5helnj",
+  INSTAGRAM_COMMENTS: "gd_ltppn085pokosxh13",
 
   // TikTok
-  TIKTOK_POSTS: "gd_l7m9k3n2xp8cvf5qrt",
+  TIKTOK_POSTS: "gd_lu702nij2f790tmv9h",
   TIKTOK_PROFILES: "gd_l1villgoiiidt09ci",
   TIKTOK_COMMENTS: "gd_lm8k3n2xp9cvf5qrt",
 
   // YouTube
-  YOUTUBE_VIDEOS: "gd_lz5h8k2m7p4bxr9nt",
-  YOUTUBE_PROFILES: "gd_ly6i9l3n8q5cws0ou",
-  YOUTUBE_COMMENTS: "gd_lx7j0m4o9r6dxt1pv",
+  YOUTUBE_VIDEOS: "gd_lk56epmy2i5g7lzu0k",
+  YOUTUBE_PROFILES: "gd_lk538t2k2p1k3oos71",
+  YOUTUBE_COMMENTS: "gd_lkf2st302ap89utw5k",
 
   // Facebook
   FACEBOOK_POSTS: "gd_lkaxegm826bjpoo9m5",
-  FACEBOOK_COMMENTS: "gd_la3bdf5h928ckqp0n6",
+  FACEBOOK_COMMENTS: "gd_lkay758p1eanlolqw8",
 
   // LinkedIn
-  LINKEDIN_POSTS: "gd_l2q4r6t8u0evxm7kb9",
+  LINKEDIN_POSTS: "gd_lyy3tktm25m4avu764",
 
   // Reddit
-  REDDIT_POSTS: "gd_l5s7u9w1y3gzo5hre1",
-  REDDIT_COMMENTS: "gd_l6t8v0x2z4hai6isf2",
+  REDDIT_POSTS: "gd_lvz8ah06191smkebj4",
+  REDDIT_COMMENTS: "gd_lvzdpsdlw09j6t702",
 
-  // Pinterest
-  PINTEREST_POSTS: "gd_l9w1y3g5i7kbm9odr3",
-  PINTEREST_PROFILES: "gd_l0x2z4h6j8lco0pes4",
+
+  QUORA_POSTS: "gd_lvz1rbj81afv3m6n5y",
+  QUORA_PROFILES: "YOUR_QUORA_PROFILES_DATASET_ID_PLEASE_UPDATE",
+
 };
 
 const SCRAPER_APIS = {
@@ -74,6 +92,728 @@ const SCRAPER_APIS = {
   // SERP API for search results
   SERP_API: `${API_URL}/serp`,
 };
+
+// Generic function to trigger a Bright Data dataset collection
+async function triggerBrightDataCollection(datasetId: string, payload: any[]): Promise<BrightDataApiResponse> {
+  if (!API_TOKEN) {
+    logger.error("BRIGHT_DATA_API_TOKEN is not set. Cannot trigger collection.");
+    throw new Error("Bright Data API token is not configured.");
+  }
+
+  const triggerUrl = `${SCRAPER_APIS.TRIGGER_DATASET}?dataset_id=${datasetId}&include_errors=true`;
+
+  try {
+    logger.info(`Triggering Bright Data collection for dataset ${datasetId} with payload: ${JSON.stringify(payload)}`);
+    const response = await axios.post(triggerUrl, payload, {
+      headers: {
+        Authorization: `Bearer ${API_TOKEN}`,
+        "Content-Type": "application/json",
+      },
+    });
+    let logMsg = `Bright Data collection triggered successfully for dataset ${datasetId}.`;
+    if (response.data?.delivery_id) logMsg += ` Delivery ID: ${response.data.delivery_id}.`;
+    if (response.data?.snapshot_id) logMsg += ` Snapshot ID: ${response.data.snapshot_id}.`;
+    // Ensure rawResponse is included for context, even if IDs are missing for some reason
+    if (!response.data?.delivery_id && !response.data?.snapshot_id) {
+        logMsg += ` No delivery_id or snapshot_id found.`;
+    }
+    logMsg += ` Raw Response: ${JSON.stringify(response.data)}`;
+    logger.info(logMsg);
+    return response.data;
+  } catch (error: any) {
+    logger.error(`Error triggering Bright Data collection for dataset ${datasetId}: ${error.message}`);
+    if (error.response) {
+      logger.error(`Error response data: ${JSON.stringify(error.response.data)}`);
+      logger.error(`Error response status: ${error.response.status}`);
+    }
+    throw error; // Re-throw the error to be handled by the caller
+  }
+}
+
+
+
+interface FacebookPostInput {
+  url?: string;
+  query?: string;
+  num_of_posts?: number;
+  posts_to_not_include?: string[];
+  start_date?: string;
+  end_date?: string;
+}
+
+export async function triggerFacebookPostsScraping(inputs: FacebookPostInput[]): Promise<BrightDataTriggerResult> {
+  const payload = inputs.map(input => {
+    let targetUrl = input.url;
+    if (!targetUrl && input.query) {
+      targetUrl = `https://www.facebook.com/search/posts/?q=${encodeURIComponent(input.query)}`;
+    }
+    if (targetUrl) {
+      return {
+        url: targetUrl,
+        num_of_posts: input.num_of_posts, // May or may not be respected by search URLs
+        posts_to_not_include: input.posts_to_not_include,
+        start_date: input.start_date,
+        end_date: input.end_date,
+      };
+    }
+    logger.warn(`Invalid input for FacebookPostsScraping: ${JSON.stringify(input)}. Must contain 'url' or 'query'.`);
+    return null;
+  }).filter(p => p !== null);
+
+  if (payload.length === 0) {
+    const msg = inputs.length > 0 ? "All inputs for FacebookPostsScraping were invalid." : "No inputs provided for FacebookPostsScraping.";
+    logger.warn(msg);
+    return { success: true, jobInitiated: false, error: msg };
+  }
+
+  try {
+    const apiResponse = await triggerBrightDataCollection(SOCIAL_MEDIA_DATASETS.FACEBOOK_POSTS, payload as any[]);
+    return {
+      success: true,
+      jobInitiated: true,
+      deliveryId: apiResponse.delivery_id,
+      snapshotId: apiResponse.snapshot_id,
+      rawResponse: apiResponse,
+    };
+  } catch (error: any) {
+    logger.error(`Failed to trigger FacebookPostsScraping for dataset ${SOCIAL_MEDIA_DATASETS.FACEBOOK_POSTS}: ${error.message}`);
+    return {
+      success: false,
+      jobInitiated: false,
+      rawResponse: error.response?.data || { message: error.message },
+      error: `Bright Data API error for Facebook Posts: ${error.message}`,
+    };
+  }
+}
+
+interface FacebookCommentInput {
+  url: string; // URL of the post to get comments from
+  get_all_replies?: boolean;
+  limit_records?: number | string;
+}
+
+export async function triggerFacebookCommentsScraping(inputs: FacebookCommentInput[]): Promise<BrightDataTriggerResult> {
+  if (inputs.length === 0) {
+    const msg = "No inputs provided for FacebookCommentsScraping.";
+    logger.warn(msg);
+    return { success: true, jobInitiated: false, error: msg };
+  }
+  try {
+    const apiResponse = await triggerBrightDataCollection(SOCIAL_MEDIA_DATASETS.FACEBOOK_COMMENTS, inputs);
+    return {
+      success: true,
+      jobInitiated: true,
+      deliveryId: apiResponse.delivery_id,
+      snapshotId: apiResponse.snapshot_id,
+      rawResponse: apiResponse,
+    };
+  } catch (error: any) {
+    logger.error(`Failed to trigger FacebookCommentsScraping for dataset ${SOCIAL_MEDIA_DATASETS.FACEBOOK_COMMENTS}: ${error.message}`);
+    return {
+      success: false,
+      jobInitiated: false,
+      rawResponse: error.response?.data || { message: error.message },
+      error: `Bright Data API error for Facebook Comments: ${error.message}`,
+    };
+  }
+}
+
+// --- Twitter/X ---
+interface TwitterPostInput {
+  url?: string;
+  query?: string;
+}
+
+export async function triggerTwitterPostsScraping(inputs: TwitterPostInput[]): Promise<BrightDataTriggerResult> {
+  const validPayloads = inputs
+    .map(input => {
+      let targetUrl = input.url;
+      if (!targetUrl && input.query) {
+        // Dataset gd_lwxkxvnf1cynvib9co expects a direct tweet URL
+        logger.warn(`Twitter Posts scraping (dataset ${SOCIAL_MEDIA_DATASETS.TWITTER_POSTS}) with only a query is not supported as it expects a direct tweet URL. Input: ${JSON.stringify(input)}. Skipping this item.`);
+        return null; // Skip this item
+      }
+      if (targetUrl) {
+        return { url: targetUrl };
+      }
+      logger.warn(`Invalid input for TwitterPostsScraping: ${JSON.stringify(input)}. Must contain 'url' or 'query'. Skipping this item.`);
+      return null;
+    })
+    .filter(p => p !== null);
+
+  if (validPayloads.length === 0) {
+    const msg = inputs.length > 0 ? "All inputs for TwitterPostsScraping were invalid or unsupported (e.g., query-only)." : "No inputs provided for TwitterPostsScraping.";
+    logger.warn(msg);
+    return { success: true, jobInitiated: false, error: msg };
+  }
+
+  try {
+    const apiResponse = await triggerBrightDataCollection(SOCIAL_MEDIA_DATASETS.TWITTER_POSTS, validPayloads as any[]);
+    return {
+      success: true,
+      jobInitiated: true,
+      deliveryId: apiResponse.delivery_id,
+      snapshotId: apiResponse.snapshot_id,
+      rawResponse: apiResponse,
+    };
+  } catch (error: any) {
+    logger.error(`Failed to trigger TwitterPostsScraping for dataset ${SOCIAL_MEDIA_DATASETS.TWITTER_POSTS}: ${error.message}`);
+    return {
+      success: false,
+      jobInitiated: false,
+      rawResponse: error.response?.data || { message: error.message },
+      error: `Bright Data API error for Twitter Posts: ${error.message}`,
+    };
+  }
+}
+
+interface TwitterProfileInput {
+  url: string; // URL of the Twitter profile
+  max_number_of_posts?: number;
+}
+
+export async function triggerTwitterProfilesScraping(inputs: TwitterProfileInput[]): Promise<BrightDataTriggerResult> {
+  if (inputs.length === 0) {
+    const msg = "No inputs provided for TwitterProfilesScraping.";
+    logger.warn(msg);
+    return { success: true, jobInitiated: false, error: msg };
+  }
+  try {
+    const apiResponse = await triggerBrightDataCollection(SOCIAL_MEDIA_DATASETS.TWITTER_PROFILES, inputs);
+    return {
+      success: true,
+      jobInitiated: true,
+      deliveryId: apiResponse.delivery_id,
+      snapshotId: apiResponse.snapshot_id,
+      rawResponse: apiResponse,
+    };
+  } catch (error: any) {
+    logger.error(`Failed to trigger TwitterProfilesScraping for dataset ${SOCIAL_MEDIA_DATASETS.TWITTER_PROFILES}: ${error.message}`);
+    return {
+      success: false,
+      jobInitiated: false,
+      rawResponse: error.response?.data || { message: error.message },
+      error: `Bright Data API error for Twitter Profiles: ${error.message}`,
+    };
+  }
+}
+
+// --- LinkedIn ---
+interface LinkedInPostInput {
+  url: string; // URL of the LinkedIn post or article
+}
+
+export async function triggerLinkedInPostsScraping(inputs: LinkedInPostInput[]): Promise<BrightDataTriggerResult> {
+  if (inputs.length === 0) {
+    const msg = "No inputs provided for LinkedInPostsScraping.";
+    logger.warn(msg);
+    return { success: true, jobInitiated: false, error: msg };
+  }
+  try {
+    const apiResponse = await triggerBrightDataCollection(SOCIAL_MEDIA_DATASETS.LINKEDIN_POSTS, inputs);
+    return {
+      success: true,
+      jobInitiated: true,
+      deliveryId: apiResponse.delivery_id,
+      snapshotId: apiResponse.snapshot_id,
+      rawResponse: apiResponse,
+    };
+  } catch (error: any) {
+    logger.error(`Failed to trigger LinkedInPostsScraping for dataset ${SOCIAL_MEDIA_DATASETS.LINKEDIN_POSTS}: ${error.message}`);
+    return {
+      success: false,
+      jobInitiated: false,
+      rawResponse: error.response?.data || { message: error.message },
+      error: `Bright Data API error for LinkedIn Posts: ${error.message}`,
+    };
+  }
+}
+
+// --- YouTube ---
+interface YouTubeVideoInput {
+  url?: string;
+  query?: string;
+  country?: string;
+}
+
+export async function triggerYouTubeVideosScraping(inputs: YouTubeVideoInput[]): Promise<BrightDataTriggerResult> {
+  const payload = inputs.map(input => {
+    let targetUrl = input.url;
+    if (!targetUrl && input.query) {
+      targetUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(input.query)}`;
+    }
+    if (targetUrl) {
+      return { url: targetUrl, country: input.country };
+    }
+    logger.warn(`Invalid input for YouTubeVideosScraping: ${JSON.stringify(input)}. Must contain 'url' or 'query'.`);
+    return null;
+  }).filter(p => p !== null);
+
+  if (payload.length === 0) {
+    const msg = inputs.length > 0 ? "All inputs for YouTubeVideosScraping were invalid." : "No inputs provided for YouTubeVideosScraping.";
+    logger.warn(msg);
+    return { success: true, jobInitiated: false, error: msg };
+  }
+
+  try {
+    const apiResponse = await triggerBrightDataCollection(SOCIAL_MEDIA_DATASETS.YOUTUBE_VIDEOS, payload as any[]);
+    return {
+      success: true,
+      jobInitiated: true,
+      deliveryId: apiResponse.delivery_id,
+      snapshotId: apiResponse.snapshot_id,
+      rawResponse: apiResponse,
+    };
+  } catch (error: any) {
+    logger.error(`Failed to trigger YouTubeVideosScraping for dataset ${SOCIAL_MEDIA_DATASETS.YOUTUBE_VIDEOS}: ${error.message}`);
+    return {
+      success: false,
+      jobInitiated: false,
+      rawResponse: error.response?.data || { message: error.message },
+      error: `Bright Data API error for YouTube Videos: ${error.message}`,
+    };
+  }
+}
+
+interface YouTubeProfileInput {
+  url: string; // URL of the YouTube channel (e.g., https://www.youtube.com/@MrBeast/about)
+}
+
+export async function triggerYouTubeProfilesScraping(inputs: YouTubeProfileInput[]): Promise<BrightDataTriggerResult> {
+  if (inputs.length === 0) {
+    const msg = "No inputs provided for YouTubeProfilesScraping.";
+    logger.warn(msg);
+    return { success: true, jobInitiated: false, error: msg };
+  }
+  try {
+    const apiResponse = await triggerBrightDataCollection(SOCIAL_MEDIA_DATASETS.YOUTUBE_PROFILES, inputs);
+    return {
+      success: true,
+      jobInitiated: true,
+      deliveryId: apiResponse.delivery_id,
+      snapshotId: apiResponse.snapshot_id,
+      rawResponse: apiResponse,
+    };
+  } catch (error: any) {
+    logger.error(`Failed to trigger YouTubeProfilesScraping for dataset ${SOCIAL_MEDIA_DATASETS.YOUTUBE_PROFILES}: ${error.message}`);
+    return {
+      success: false,
+      jobInitiated: false,
+      rawResponse: error.response?.data || { message: error.message },
+      error: `Bright Data API error for YouTube Profiles: ${error.message}`,
+    };
+  }
+}
+
+interface YouTubeCommentInput {
+  url: string; // URL of the YouTube video to get comments from
+  sort_by?: string;
+}
+
+export async function triggerYouTubeCommentsScraping(inputs: YouTubeCommentInput[]): Promise<BrightDataTriggerResult> {
+  if (inputs.length === 0) {
+    const msg = "No inputs provided for YouTubeCommentsScraping.";
+    logger.warn(msg);
+    return { success: true, jobInitiated: false, error: msg };
+  }
+  try {
+    const apiResponse = await triggerBrightDataCollection(SOCIAL_MEDIA_DATASETS.YOUTUBE_COMMENTS, inputs);
+    return {
+      success: true,
+      jobInitiated: true,
+      deliveryId: apiResponse.delivery_id,
+      snapshotId: apiResponse.snapshot_id,
+      rawResponse: apiResponse,
+    };
+  } catch (error: any) {
+    logger.error(`Failed to trigger YouTubeCommentsScraping for dataset ${SOCIAL_MEDIA_DATASETS.YOUTUBE_COMMENTS}: ${error.message}`);
+    return {
+      success: false,
+      jobInitiated: false,
+      rawResponse: error.response?.data || { message: error.message },
+      error: `Bright Data API error for YouTube Comments: ${error.message}`,
+    };
+  }
+}
+
+// --- Reddit ---
+interface RedditPostInput {
+  url?: string;
+  query?: string;
+}
+
+export async function triggerRedditPostsScraping(inputs: RedditPostInput[]): Promise<BrightDataTriggerResult> {
+  const validPayloads = inputs
+    .map(input => {
+      let targetUrl = input.url;
+      if (!targetUrl && input.query) {
+        // Dataset gd_lvz8ah06191smkebj4 expects a direct Reddit URL (post, subreddit, user)
+        logger.warn(`Reddit Posts scraping (dataset ${SOCIAL_MEDIA_DATASETS.REDDIT_POSTS}) with only a query is not supported as it expects a direct Reddit URL. Input: ${JSON.stringify(input)}. Skipping this item.`);
+        return null; // Skip this item
+      }
+      if (targetUrl) {
+        return { url: targetUrl };
+      }
+      logger.warn(`Invalid input for RedditPostsScraping: ${JSON.stringify(input)}. Must contain 'url' or 'query'. Skipping this item.`);
+      return null;
+    })
+    .filter(p => p !== null);
+
+  if (validPayloads.length === 0) {
+    const msg = inputs.length > 0 ? "All inputs for RedditPostsScraping were invalid or unsupported (e.g., query-only)." : "No inputs provided for RedditPostsScraping.";
+    logger.warn(msg);
+    return { success: true, jobInitiated: false, error: msg };
+  }
+
+  try {
+    const apiResponse = await triggerBrightDataCollection(SOCIAL_MEDIA_DATASETS.REDDIT_POSTS, validPayloads as any[]);
+    return {
+      success: true,
+      jobInitiated: true,
+      deliveryId: apiResponse.delivery_id,
+      snapshotId: apiResponse.snapshot_id,
+      rawResponse: apiResponse,
+    };
+  } catch (error: any) {
+    logger.error(`Failed to trigger RedditPostsScraping for dataset ${SOCIAL_MEDIA_DATASETS.REDDIT_POSTS}: ${error.message}`);
+    return {
+      success: false,
+      jobInitiated: false,
+      rawResponse: error.response?.data || { message: error.message },
+      error: `Bright Data API error for Reddit Posts: ${error.message}`,
+    };
+  }
+}
+
+interface RedditCommentInput {
+  url?: string;
+  query?: string;
+}
+
+export async function triggerRedditCommentsScraping(inputs: RedditCommentInput[]): Promise<BrightDataTriggerResult> {
+  const payload = inputs.map(input => {
+    let targetUrl = input.url;
+    if (!targetUrl && input.query) {
+      targetUrl = `https://www.reddit.com/search/?q=${encodeURIComponent(input.query)}`;
+    }
+    if (targetUrl) {
+      return { url: targetUrl };
+    }
+    logger.warn(`Invalid input for RedditCommentsScraping: ${JSON.stringify(input)}. Must contain 'url' or 'query'.`);
+    return null;
+  }).filter(p => p !== null);
+
+  if (payload.length === 0) {
+    const msg = inputs.length > 0 ? "All inputs for RedditCommentsScraping were invalid." : "No inputs provided for RedditCommentsScraping.";
+    logger.warn(msg);
+    return { success: true, jobInitiated: false, error: msg };
+  }
+
+  try {
+    const apiResponse = await triggerBrightDataCollection(SOCIAL_MEDIA_DATASETS.REDDIT_COMMENTS, payload as any[]);
+    return {
+      success: true,
+      jobInitiated: true,
+      deliveryId: apiResponse.delivery_id,
+      snapshotId: apiResponse.snapshot_id,
+      rawResponse: apiResponse,
+    };
+  } catch (error: any) {
+    logger.error(`Failed to trigger RedditCommentsScraping for dataset ${SOCIAL_MEDIA_DATASETS.REDDIT_COMMENTS}: ${error.message}`);
+    return {
+      success: false,
+      jobInitiated: false,
+      rawResponse: error.response?.data || { message: error.message },
+      error: `Bright Data API error for Reddit Comments: ${error.message}`,
+    };
+  }
+}
+
+interface InstagramInput {
+  url?: string;
+  query?: string;
+  max_number_of_posts?: number;
+  scrape_reels?: boolean;
+  scrape_stories?: boolean;
+  scrape_tagged_posts?: boolean;
+  start_date?: string;
+  end_date?: string;
+}
+
+export async function triggerInstagramPostsScraping(inputs: InstagramInput[]): Promise<BrightDataTriggerResult> {
+  const payload = inputs.map(input => {
+    let targetUrl = input.url;
+    if (!targetUrl && input.query) {
+      // Instagram search URLs can be complex, this is a general approach
+      // For hashtag search: `https://www.instagram.com/explore/tags/${encodeURIComponent(input.query.replace(/\s+/g, ''))}/`
+      targetUrl = `https://www.instagram.com/explore/search/keyword/?q=${encodeURIComponent(input.query)}`;
+      logger.warn(
+        "Instagram scraping with a query. The effectiveness of this search URL depends on Bright Data's capabilities for Instagram general search."
+      );
+    }
+    if (targetUrl) {
+      return {
+        url: targetUrl,
+        max_number_of_posts: input.max_number_of_posts, // May not apply to search URLs
+        scrape_reels: input.scrape_reels,
+        scrape_stories: input.scrape_stories,
+        scrape_tagged_posts: input.scrape_tagged_posts,
+        start_date: input.start_date,
+        end_date: input.end_date,
+      };
+    }
+    logger.warn(`Invalid input for InstagramPostsScraping: ${JSON.stringify(input)}. Must contain 'url' or 'query'.`);
+    return null;
+  }).filter(p => p !== null);
+
+  if (payload.length === 0) {
+    const msg = inputs.length > 0 ? "All inputs for InstagramPostsScraping were invalid." : "No inputs provided for InstagramPostsScraping.";
+    logger.warn(msg);
+    return { success: true, jobInitiated: false, error: msg };
+  }
+
+  try {
+    const apiResponse = await triggerBrightDataCollection(SOCIAL_MEDIA_DATASETS.INSTAGRAM_POSTS, payload as any[]);
+    return {
+      success: true,
+      jobInitiated: true,
+      deliveryId: apiResponse.delivery_id,
+      snapshotId: apiResponse.snapshot_id,
+      rawResponse: apiResponse,
+    };
+  } catch (error: any) {
+    logger.error(`Failed to trigger InstagramPostsScraping for dataset ${SOCIAL_MEDIA_DATASETS.INSTAGRAM_POSTS}: ${error.message}`);
+    return {
+      success: false,
+      jobInitiated: false,
+      rawResponse: error.response?.data || { message: error.message },
+      error: `Bright Data API error for Instagram Posts: ${error.message}`,
+    };
+  }
+}
+
+export async function triggerInstagramProfilesScraping(inputs: InstagramInput[]): Promise<BrightDataTriggerResult> {
+  logger.warn("Instagram Profiles scraping payload might need specific parameters beyond just URL. Using generic URL payload for now. Verify Bright Data documentation.");
+  const payload = inputs.map(input => ({ url: input.url })).filter(p => p.url);
+  if (payload.length === 0) {
+    const msg = inputs.length > 0 ? "All inputs for InstagramProfilesScraping were invalid (missing URL)." : "No inputs provided for InstagramProfilesScraping.";
+    logger.warn(msg);
+    return { success: true, jobInitiated: false, error: msg };
+  }
+  try {
+    const apiResponse = await triggerBrightDataCollection(SOCIAL_MEDIA_DATASETS.INSTAGRAM_PROFILES, payload);
+    return {
+      success: true,
+      jobInitiated: true,
+      deliveryId: apiResponse.delivery_id,
+      snapshotId: apiResponse.snapshot_id,
+      rawResponse: apiResponse,
+    };
+  } catch (error: any) {
+    logger.error(`Failed to trigger InstagramProfilesScraping for dataset ${SOCIAL_MEDIA_DATASETS.INSTAGRAM_PROFILES}: ${error.message}`);
+    return {
+      success: false,
+      jobInitiated: false,
+      rawResponse: error.response?.data || { message: error.message },
+      error: `Bright Data API error for Instagram Profiles: ${error.message}`,
+    };
+  }
+}
+
+export async function triggerInstagramCommentsScraping(inputs: InstagramInput[]): Promise<BrightDataTriggerResult> {
+  logger.warn("Instagram Comments scraping payload might need specific parameters beyond just URL. Using generic URL payload for now. Verify Bright Data documentation.");
+  const payload = inputs.map(input => ({ url: input.url })).filter(p => p.url);
+   if (payload.length === 0) {
+    const msg = inputs.length > 0 ? "All inputs for InstagramCommentsScraping were invalid (missing URL)." : "No inputs provided for InstagramCommentsScraping.";
+    logger.warn(msg);
+    return { success: true, jobInitiated: false, error: msg };
+  }
+  try {
+    const apiResponse = await triggerBrightDataCollection(SOCIAL_MEDIA_DATASETS.INSTAGRAM_COMMENTS, payload);
+    return {
+      success: true,
+      jobInitiated: true,
+      deliveryId: apiResponse.delivery_id,
+      snapshotId: apiResponse.snapshot_id,
+      rawResponse: apiResponse,
+    };
+  } catch (error: any) {
+    logger.error(`Failed to trigger InstagramCommentsScraping for dataset ${SOCIAL_MEDIA_DATASETS.INSTAGRAM_COMMENTS}: ${error.message}`);
+    return {
+      success: false,
+      jobInitiated: false,
+      rawResponse: error.response?.data || { message: error.message },
+      error: `Bright Data API error for Instagram Comments: ${error.message}`,
+    };
+  }
+}
+
+// --- TikTok ---
+interface TikTokInput {
+  url?: string;
+  query?: string;
+  max_video_count?: number;
+  start_date?: string;
+  end_date?: string;
+}
+
+export async function triggerTikTokPostsScraping(inputs: TikTokInput[]): Promise<BrightDataTriggerResult> {
+  const payload = inputs.map(input => {
+    let targetUrl = input.url;
+    if (!targetUrl && input.query) {
+      targetUrl = `https://www.tiktok.com/search/video?q=${encodeURIComponent(input.query)}`;
+    }
+    if (targetUrl) {
+      return {
+        url: targetUrl,
+        max_video_count: input.max_video_count, // May not apply to search URLs
+        start_date: input.start_date,
+        end_date: input.end_date,
+      };
+    }
+    logger.warn(`Invalid input for TikTokPostsScraping: ${JSON.stringify(input)}. Must contain 'url' or 'query'.`);
+    return null;
+  }).filter(p => p !== null);
+
+  if (payload.length === 0) {
+    const msg = inputs.length > 0 ? "All inputs for TikTokPostsScraping were invalid." : "No inputs provided for TikTokPostsScraping.";
+    logger.warn(msg);
+    return { success: true, jobInitiated: false, error: msg };
+  }
+
+  try {
+    const apiResponse = await triggerBrightDataCollection(SOCIAL_MEDIA_DATASETS.TIKTOK_POSTS, payload as any[]);
+    return {
+      success: true,
+      jobInitiated: true,
+      deliveryId: apiResponse.delivery_id,
+      snapshotId: apiResponse.snapshot_id,
+      rawResponse: apiResponse,
+    };
+  } catch (error: any) {
+    logger.error(`Failed to trigger TikTokPostsScraping for dataset ${SOCIAL_MEDIA_DATASETS.TIKTOK_POSTS}: ${error.message}`);
+    return {
+      success: false,
+      jobInitiated: false,
+      rawResponse: error.response?.data || { message: error.message },
+      error: `Bright Data API error for TikTok Posts: ${error.message}`,
+    };
+  }
+}
+
+export async function triggerTikTokProfilesScraping(inputs: TikTokInput[]): Promise<BrightDataTriggerResult> {
+  logger.warn("TikTok Profiles scraping payload might need specific parameters beyond just URL. Using generic URL payload for now. Verify Bright Data documentation.");
+  const payload = inputs.map(input => ({ url: input.url })).filter(p => p.url);
+  if (payload.length === 0) {
+    const msg = inputs.length > 0 ? "All inputs for TikTokProfilesScraping were invalid (missing URL)." : "No inputs provided for TikTokProfilesScraping.";
+    logger.warn(msg);
+    return { success: true, jobInitiated: false, error: msg };
+  }
+  try {
+    const apiResponse = await triggerBrightDataCollection(SOCIAL_MEDIA_DATASETS.TIKTOK_PROFILES, payload);
+    return {
+      success: true,
+      jobInitiated: true,
+      deliveryId: apiResponse.delivery_id,
+      snapshotId: apiResponse.snapshot_id,
+      rawResponse: apiResponse,
+    };
+  } catch (error: any) {
+    logger.error(`Failed to trigger TikTokProfilesScraping for dataset ${SOCIAL_MEDIA_DATASETS.TIKTOK_PROFILES}: ${error.message}`);
+    return {
+      success: false,
+      jobInitiated: false,
+      rawResponse: error.response?.data || { message: error.message },
+      error: `Bright Data API error for TikTok Profiles: ${error.message}`,
+    };
+  }
+}
+
+// --- Quora ---
+interface QuoraInput {
+  url?: string;
+  query?: string;
+  // Add other specific Quora parameters if known
+}
+
+export async function triggerQuoraPostsScraping(inputs: QuoraInput[]): Promise<BrightDataTriggerResult> {
+  if (SOCIAL_MEDIA_DATASETS.QUORA_POSTS.startsWith("YOUR_")) {
+    const errorMessage = "Quora Posts dataset ID is a placeholder. Please update it in SOCIAL_MEDIA_DATASETS.";
+    logger.error(errorMessage);
+    // Return a structured error instead of throwing, to align with the new pattern
+    return { success: false, jobInitiated: false, error: errorMessage };
+  }
+  const payload = inputs.map(input => {
+    let targetUrl = input.url;
+    if (!targetUrl && input.query) {
+      targetUrl = `https://www.quora.com/search?q=${encodeURIComponent(input.query)}`;
+    }
+    if (targetUrl) {
+      return { url: targetUrl };
+    }
+    logger.warn(`Invalid input for QuoraPostsScraping: ${JSON.stringify(input)}. Must contain 'url' or 'query'.`);
+    return null;
+  }).filter(p => p !== null);
+
+  if (payload.length === 0) {
+    const msg = inputs.length > 0 ? "All inputs for QuoraPostsScraping were invalid." : "No inputs provided for QuoraPostsScraping.";
+    logger.warn(msg);
+    return { success: true, jobInitiated: false, error: msg };
+  }
+
+  try {
+    const apiResponse = await triggerBrightDataCollection(SOCIAL_MEDIA_DATASETS.QUORA_POSTS, payload as any[]);
+    return {
+      success: true,
+      jobInitiated: true,
+      deliveryId: apiResponse.delivery_id,
+      snapshotId: apiResponse.snapshot_id,
+      rawResponse: apiResponse,
+    };
+  } catch (error: any) {
+    logger.error(`Failed to trigger QuoraPostsScraping for dataset ${SOCIAL_MEDIA_DATASETS.QUORA_POSTS}: ${error.message}`);
+    return {
+      success: false,
+      jobInitiated: false,
+      rawResponse: error.response?.data || { message: error.message },
+      error: `Bright Data API error for Quora Posts: ${error.message}`,
+    };
+  }
+}
+
+export async function triggerQuoraProfilesScraping(inputs: QuoraInput[]): Promise<BrightDataTriggerResult> {
+  if (SOCIAL_MEDIA_DATASETS.QUORA_PROFILES.startsWith("YOUR_")) {
+    const errorMessage = "Quora Profiles dataset ID is a placeholder. Please update it in SOCIAL_MEDIA_DATASETS.";
+    logger.error(errorMessage);
+    return { success: false, jobInitiated: false, error: errorMessage };
+  }
+  logger.warn("Quora Profiles scraping payload might need specific parameters beyond just URL. Using generic URL payload for now. Verify Bright Data documentation.");
+  const payload = inputs.map(input => ({ url: input.url })).filter(p => p.url);
+  if (payload.length === 0) {
+    const msg = inputs.length > 0 ? "All inputs for QuoraProfilesScraping were invalid (missing URL)." : "No inputs provided for QuoraProfilesScraping.";
+    logger.warn(msg);
+    return { success: true, jobInitiated: false, error: msg };
+  }
+  try {
+    const apiResponse = await triggerBrightDataCollection(SOCIAL_MEDIA_DATASETS.QUORA_PROFILES, payload);
+    return {
+      success: true,
+      jobInitiated: true,
+      deliveryId: apiResponse.delivery_id,
+      snapshotId: apiResponse.snapshot_id,
+      rawResponse: apiResponse,
+    };
+  } catch (error: any) {
+    logger.error(`Failed to trigger QuoraProfilesScraping for dataset ${SOCIAL_MEDIA_DATASETS.QUORA_PROFILES}: ${error.message}`);
+    return {
+      success: false,
+      jobInitiated: false,
+      rawResponse: error.response?.data || { message: error.message },
+      error: `Bright Data API error for Quora Profiles: ${error.message}`,
+    };
+  }
+}
+
 
 interface DiscoveryResult {
   url: string;
@@ -338,6 +1078,7 @@ export class McpService {
       const response = await axios({
         url: `${SCRAPER_APIS.TRIGGER_DATASET}?dataset_id=${SOCIAL_MEDIA_DATASETS.TWITTER_POSTS}&format=json`,
         method: "POST",
+
         data: [
           {
             search_query: query,
@@ -400,68 +1141,76 @@ export class McpService {
   private async discoverFromFacebookAdvanced(
     keywords: string[]
   ): Promise<DiscoveryResult[]> {
+    if (this.isTimeoutExceeded()) return [];
+    logger.info(
+      `[${this.sessionId}] Advanced Facebook discovery using Crawl API for: ${keywords.join(
+        ", "
+      )}`
+    );
+    const API_TOKEN = process.env.BRIGHT_DATA_API_TOKEN;
+
+    if (!API_TOKEN) {
+      logger.error("Bright Data API token not configured.");
+      return [];
+    }
+
+
+    const BRIGHT_DATA_FACEBOOK_DATASET_ID = "gd_lkaxegm826bjpoo9m5";
+    const BRIGHT_DATA_API_BASE_URL = "https://api.brightdata.com";
+
+    const facebookSearchUrl = `https://www.facebook.com/search/posts/?q=${encodeURIComponent(
+      keywords.join(" ")
+    )}`;
+
     try {
-      const query = keywords.slice(0, 3).join(" ");
-      logger.info(`[FACEBOOK] 📘 Searching Facebook with query: ${query}`);
-
-      // Use public Facebook search (limited due to privacy restrictions)
-      const facebookSearchUrl = `https://www.facebook.com/public/${encodeURIComponent(query)}`;
-
-      const response = await axios({
-        url: SCRAPER_APIS.WEB_UNLOCKER,
+      logger.info(`[${this.sessionId}] Triggering Bright Data dataset for Facebook.`);
+      const triggerResponse = await axios({
+        url: `${BRIGHT_DATA_API_BASE_URL}/datasets/v3/trigger`,
         method: "POST",
-        data: {
-          url: facebookSearchUrl,
-          zone: WEB_UNLOCKER_ZONE,
-          format: "raw",
-          data_format: "html",
-        },
         headers: {
           Authorization: `Bearer ${API_TOKEN}`,
           "Content-Type": "application/json",
         },
-        timeout: 30000,
+        data: {
+          dataset_id: BRIGHT_DATA_FACEBOOK_DATASET_ID,
+          urls: [facebookSearchUrl],
+          output_format: "ld_json",
+          wait_for_results: false, // We will poll for results
+        },
+        timeout: 30000, // 30 seconds timeout for trigger
       });
 
-      if (response.data) {
-        return this.parseFacebookResultsFromHTML(response.data, query);
+      const snapshotId = triggerResponse.data?.snapshot_id;
+      if (!snapshotId) {
+        logger.error(
+          "Failed to trigger Bright Data dataset or get snapshot_id.",
+          triggerResponse.data
+        );
+        return [];
       }
+
+      logger.info(
+        `[${this.sessionId}] Dataset triggered, snapshot_id: ${snapshotId}. Polling for results...`
+      );
+
+      // Poll for results using the existing helper method
+      const jsonDataString = await this.pollForDatasetResults(snapshotId, 10, 5000); // Poll for up to 10 attempts, 5s delay (total 50s)
+
+      if (jsonDataString) {
+        logger.info(`[${this.sessionId}] Received data from snapshot ${snapshotId}. Parsing...`);
+        return this.parseFacebookResultsFromCrawlAPI(jsonDataString, keywords.join(" "));
+      } else {
+        logger.error(
+          `Failed to retrieve data for snapshot_id: ${snapshotId} after polling.`
+        );
+        return [];
+      }
+    } catch (error: any) {
+      logger.error(
+        `Error during advanced Facebook discovery with Crawl API: ${error.message}`,
+        error.response?.data
+      );
       return [];
-    } catch (error) {
-      logger.error(`[FACEBOOK] ❌ Error: ${error}`);
-      // Return enhanced fallback results
-      return [
-        {
-          url: `https://www.facebook.com/search/top?q=${encodeURIComponent(keywords.join(" "))}`,
-          title: `Facebook discussions about ${keywords[0]}`,
-          description: `Public Facebook posts, groups, and page discussions related to ${keywords.join(", ")}. Community reactions and shared content.`,
-          source: "Facebook",
-          type: "SOCIAL_MEDIA",
-          credibilityScore: 5,
-          platform: "Facebook",
-          engagement: {
-            likes: Math.floor(Math.random() * 1500) + 150,
-            shares: Math.floor(Math.random() * 600) + 80,
-            comments: Math.floor(Math.random() * 300) + 30,
-          },
-          verified: false,
-        },
-        {
-          url: `https://www.facebook.com/groups/search/${encodeURIComponent(keywords[0])}`,
-          title: `Facebook groups discussing ${keywords[0]}`,
-          description: `Community groups and public discussions about ${keywords[0]} with member insights and debates`,
-          source: "Facebook",
-          type: "SOCIAL_MEDIA",
-          credibilityScore: 4,
-          platform: "Facebook",
-          engagement: {
-            likes: Math.floor(Math.random() * 800) + 100,
-            shares: Math.floor(Math.random() * 300) + 40,
-            comments: Math.floor(Math.random() * 500) + 60,
-          },
-          verified: false,
-        },
-      ];
     }
   }
 
@@ -3918,6 +4667,70 @@ export class McpService {
     } catch (error) {
       logger.error(`Error parsing Twitter HTML: ${error}`);
       return [];
+    }
+  }
+
+  private parseFacebookResultsFromCrawlAPI(
+    jsonDataString: string,
+    query: string
+  ): DiscoveryResult[] {
+    logger.debug(`[${this.sessionId}] Parsing Facebook results from Crawl API JSON.`);
+    try {
+      const items = JSON.parse(jsonDataString);
+      const results: DiscoveryResult[] = [];
+
+      // Ensure items is an array before trying to iterate
+      if (!Array.isArray(items)) {
+        logger.warn("Expected an array of items from Crawl API, but received:", typeof items);
+        // Attempt to see if items is an object with a common graph structure
+        if (typeof items === 'object' && items !== null && Array.isArray(items['@graph'])) {
+          // Process items from '@graph' array if present
+          for (const item of items['@graph']) {
+            this.extractDiscoveryResultFromFacebookItem(item, query, results);
+          }
+        } else if (typeof items === 'object' && items !== null) {
+          // Process a single item if the root is an object (not an array)
+          this.extractDiscoveryResultFromFacebookItem(items, query, results);
+        }
+      } else {
+         for (const item of items) {
+            this.extractDiscoveryResultFromFacebookItem(item, query, results);
+          }
+      }
+      return results.slice(0, 10); // Limit to 10 results like other parsers
+    } catch (error: any) {
+      logger.error(
+        `Error parsing Facebook JSON-LD results: ${error.message}`
+      );
+      return [];
+    }
+  }
+
+  private extractDiscoveryResultFromFacebookItem(item: any, query: string, results: DiscoveryResult[]): void {
+    // Assuming item is a JSON-LD object, e.g., SocialMediaPosting
+    // Adjust these field extractions based on the actual JSON-LD structure provided by Bright Data
+    const postUrl = item.url || item["@id"];
+    let title = item.headline || item.name || (item.text ? item.text.substring(0, 70) + "..." : `Facebook content related to ${query}`);
+    let description = item.articleBody || item.text || item.description || "";
+    const authorName = item.author?.name || item.author?.actor?.name || item.creator?.name;
+    const publishedDate = item.datePublished || item.uploadDate || item.dateCreated;
+
+    if (postUrl && (title || description)) {
+      // Ensure title and description are strings
+      title = String(title || '');
+      description = String(description || '');
+
+      results.push({
+        url: postUrl,
+        title: title.substring(0, 150), // Truncate title
+        description: description.substring(0, 300), // Truncate description
+        source: "Facebook",
+        type: "SOCIAL_MEDIA",
+        credibilityScore: 5, // Default, can be adjusted
+        platform: "Facebook",
+        author: authorName || undefined,
+        publishedDate: publishedDate ? new Date(publishedDate).toISOString() : undefined,
+      });
     }
   }
 
