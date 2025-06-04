@@ -2,7 +2,11 @@
 
 **BrightCheck** is a comprehensive, production-grade fact-checking agent built for the Bright Data hackathon. It leverages Bright Data's MCP (Model Context Protocol) platform with all four actions: **Discover**, **Access**, **Extract**, and **Interact** to provide superior fact-checking capabilities compared to ChatGPT, Perplexity, and other existing solutions.
 
+## 🎥 Demo Video
+
 [![Watch the demo](https://img.youtube.com/vi/ZNZ3_Wnyv-4/maxresdefault.jpg)](https://youtu.be/ZNZ3_Wnyv-4?si=RZYc3l9qBWgezoTV)
+
+👉 [**Click here to watch the demo video**](https://youtu.be/ZNZ3_Wnyv-4?si=RZYc3l9qBWgezoTV)
 
 ## 🚀 Key Features
 
